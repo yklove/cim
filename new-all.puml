@@ -1,0 +1,67 @@
+@startuml
+'https://plantuml.com/sequence-diagram
+
+participant imClient as client
+participant jeeplus as jeeplus
+database zk
+database redis
+
+
+jeeplus -> zk : 启动服务时，监听zk的节点
+activate jeeplus
+activate zk
+zk --> jeeplus : 监听成功
+deactivate zk
+deactivate jeeplus
+
+jeeplus -> zk : 启动服务时，向zk创建一个临时节点\n(临时节点在服务停止后，节点会自动删除)，\n节点内容为：服务的ip、长链端口、http端口
+activate jeeplus
+activate zk
+zk --> jeeplus : 创建成功
+deactivate zk
+deactivate jeeplus
+
+jeeplus -> jeeplus : spring容器创建完成，触发 CIMServer.start方法
+activate jeeplus
+jeeplus -> jeeplus : 启动netty，监听长链端口，指定处理器为：CIMServerInitializer
+jeeplus -> jeeplus : 在CIMServerInitializer中指定业务处理器，\n所有的消息均有他来处理：CIMServerHandle\n同时指定了一个心跳：IdleStateHandler \n超过10s没有消息，就发起心跳，心跳无响应会剔除客户端
+deactivate jeeplus
+
+zk o-> jeeplus : 有server创建了临时节点
+activate jeeplus
+jeeplus -> jeeplus : 保存server的ip及端口
+deactivate jeeplus
+
+client -> jeeplus : 登录并获取imServer的ip及端口(http接口)
+activate client
+activate jeeplus
+jeeplus -> client : 登陆成功
+deactivate jeeplus
+client -> jeeplus : 发起websocket建立
+activate jeeplus
+jeeplus -> jeeplus : 根据用户id从内存里，依据配置的算法，\n选择一台imServer的ip及端口\n
+jeeplus -> redis : 保存用户id和imServer的关系到redis
+jeeplus --> client : 建立成功
+deactivate jeeplus
+client -> jeeplus : 通过长链，发送 Constants.CommandType.LOGIN
+activate jeeplus
+jeeplus -> jeeplus : 保存用户id和长链通道的关系
+jeeplus --> client : 成功
+deactivate jeeplus
+deactivate client
+
+client -> jeeplus : 发送私聊消息(http接口)
+activate client
+activate jeeplus
+jeeplus -> redis : 通过用户id从redis中找到对应的imServer
+activate redis
+redis -> jeeplus : 返回id对应的imServer信息
+deactivate redis
+jeeplus -> jeeplus : 调用对应机器的 sendMsg 接口 (http接口) 发送消息
+activate jeeplus
+jeeplus --> jeeplus : 根据接收人id，找到对应的长链通道，推送消息给用户
+deactivate jeeplus
+jeeplus -> client : 成功
+deactivate jeeplus
+deactivate client
+@enduml
