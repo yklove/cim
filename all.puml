@@ -1,0 +1,69 @@
+@startuml
+'https://plantuml.com/sequence-diagram
+
+participant imClient as client
+participant imRouter as router
+participant imServer as server
+database zk
+database redis
+
+server -> zk : 启动服务时，向zk创建一个临时节点\n(临时节点在服务停止后，节点会自动删除)，\n节点内容为：服务的ip、长链端口、http端口
+activate server
+activate zk
+zk --> server : 创建成功
+deactivate zk
+deactivate server
+
+server -> server : spring容器创建完成，触发 CIMServer.start方法
+activate server
+server -> server : 启动netty，监听长链端口，指定处理器为：CIMServerInitializer
+server -> server : 在CIMServerInitializer中指定业务处理器，\n所有的消息均有他来处理：CIMServerHandle\n同时指定了一个心跳：IdleStateHandler \n超过10s没有消息，就发起心跳，心跳无响应会剔除客户端
+deactivate server
+
+router -> zk : 启动服务时，监听zk的节点
+activate router
+activate zk
+zk --> router : 监听成功
+deactivate zk
+deactivate router
+
+zk o-> router : 有server创建了临时节点
+activate router
+router -> router : 保存server的ip及端口
+deactivate router
+
+client -> router : 登录并获取imServer的ip及端口(http接口)
+activate client
+activate router
+router -> router : 根据用户id从内存里，依据配置的算法，\n选择一台imServer的ip及端口\n
+router -> redis : 保存用户id和imServer的关系到redis
+router --> client : 返回imServer的ip及端口
+deactivate router
+client -> server : 向imServer发起长链接建立
+activate server
+server --> client : 建立成功
+deactivate server
+client -> server : 通过长链，发送 Constants.CommandType.LOGIN
+activate server
+server -> server : 保存用户id和长链通道的关系
+server --> client : 成功
+deactivate server
+deactivate client
+
+client -> router : 发送私聊消息(http接口)
+activate client
+activate router
+router -> redis : 通过用户id从redis中找到对应的imServer
+activate redis
+redis -> router : 返回id对应的imServer信息
+deactivate redis
+router -> server : 调用imServer的 sendMsg 接口 (http接口) 发送消息
+activate server
+server --> server : 根据接收人id，找到对应的长链通道，推送消息给用户
+server --> router : 成功
+deactivate server
+router -> client : 成功
+deactivate router
+deactivate router
+deactivate client
+@enduml
